@@ -1,0 +1,311 @@
+---
+title: "Final Project"
+author: "Idxian Gonzalez"
+date: "12/29/2021"
+output:
+  pdf_document: default
+  html_document: default
+---
+
+```{r setup, include=FALSE}
+##Making sure required packages are available##
+if(!require(tidyverse)) install.packages("tidyverse", repos = "http://cran.us.r-project.org")
+if(!require(ggplot2)) install.packages("ggplot2", repos = "http://cran.us.r-project.org")
+if(!require(caret)) install.packages("caret", repos = "http://cran.us.r-project.org")
+if(!require(Metrics)) install.packages("Metrics", repos = "http://cran.us.r-project.org")
+if(!require(Class)) install.packages("Class", repos = "http://cran.us.r-project.org")
+
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+library(ggplot2)
+library(caret)
+library(Metrics)
+library(class)
+```
+
+# Introduction
+
+This is a submission for the EDX Data Science Specialization Capstone project, which requests a Choose Your Own Project approach where we can utilize the tools learned throughout the classwork. For this project, I will be utilizing a previously curated Kaggle data set pertaining to video game sales and their *Critic_Score*. This data set can be downloaded freely at <https://www.kaggle.com/rush4ratio/video-game-sales-with-ratings> and will also be included in the project submission.
+
+Our goal for this project will be to see if we can predict a games *Critic_Score* by utilizing the variables provided in the data set. We can begin by loading the data in the form of a .csv file into our working directory:
+
+```{r, Initial Data Load}
+vgsales <- read.csv("~/Video_Games_Sales_as_at_22_Dec_2016.csv") 
+## Initial Data Load, grab file from working directory
+str(vgsales) ##Evaluate variable types
+head(vgsales) ## View first 10 rows of data set
+
+```
+
+The variable *Year_of_Release* appears to be in a character format, and the *User_Score* variable is both in character format and in a different scale than *Critic_Count*.
+
+```{r, Coerce Numeric Year of Release}
+vgsales$Year_of_Release <- as.numeric(vgsales$Year_of_Release ) ## Coerce Numeric
+
+vgsales$User_Score <- as.numeric(vgsales$User_Score) * 10 
+## Coerce numeric and multiply by 10 to have User_Score in same format as Critic_Count
+
+```
+
+Besides this, there's not much else to be done to this data set. We can begin our analysis of the contents of these variables.
+
+# Methods and Analysis - Exploratory Data Analysis
+
+Our target variable for this analysis is the *Critic_Score*. Lets begin our analysis by evaluating these variables. 
+
+
+```{r, }
+summary(vgsales$Critic_Score) ## Display summary statistics for target variable
+
+```
+
+With a minimum value of 13 and a maximum of 98, we can observe that the *Critic_Score* variable has wide range of values. We can also observe that 8,582 of the values in the data set are NA. Given that this is the variable we are trying to predict, we will only leave entries in our *vgsales data set* that have a value for this field. We can do so with the following code:
+
+```{r, Clean NA }
+
+vgsales <- vgsales[complete.cases(vgsales$Critic_Score),] 
+## Remove all rows with NA values in Critic_Score
+sum(is.na(vgsales$Critic_Score))
+
+
+
+```
+
+
+We are then left with 8,137 observations with a valid *Critic_Score*. We can first evaluate the average rating when grouped by *Genre*:
+
+```{r, Plot by Genre}
+vgsales_genre <- vgsales %>% group_by(Genre) %>% summarize(avg_score = mean(Critic_Score), avg_count = mean(Critic_Count)) # Create grouped Genre Data
+
+head(vgsales_genre[order(-vgsales_genre$avg_score),]) ##Evaluate sorted rows
+
+vgsales_genre %>% ggplot(aes(x = reorder(Genre, -avg_score) ,y = avg_score)) + geom_col() + scale_y_continuous(limits=c(0,100)) + theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) + scale_x_discrete("Genre") ## Generate Plot
+
+```
+
+It's interesting to note that sports is third in regards to *Critic_Score*, however it is on average reviewed much less often than other categories. Lets examine this same table, but sorted by average *Critic_count*:
+
+```{r, Plot by Genre2}
+head(vgsales_genre[order(-vgsales_genre$avg_count),]) ## View top ordered rows
+
+vgsales_genre %>% ggplot(aes(x = reorder(Genre, -avg_count) ,y = avg_count)) + geom_col() + scale_y_continuous(limits=c(0,50)) + theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) + scale_x_discrete("Genre") ## Generate Plot
+
+```
+
+The most reviewed category are Shooter based games, and by a fairly large margin. Is there any particular reason these games are reviewed more often? Lets compare this with worldwide sales by genre:
+
+```{r, Sales by Genre }
+
+vgsales_worldsales <- vgsales %>% group_by(Genre) %>% summarize(avg_score = mean(Critic_Score), avg_count = mean(Critic_Count), avg_sales = mean(Global_Sales))
+head(vgsales_worldsales[order(-vgsales_worldsales$avg_sales),])
+
+vgsales_worldsales %>% ggplot(aes(x = reorder(Genre, -avg_sales) ,y = avg_sales)) + geom_col() + scale_y_continuous(limits=c(0,1.10)) + theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) + scale_x_discrete("Genre") ## Generate Plot
+
+```
+
+Shooters do seems to have more average global sales than sports, however not to a degree that would correspond to a +2 on average game score when compared against the sports genre. We can also note that the category with most average global sales is Misc, although this might just be an effect of pooling various niche Genres into a catch-all Miscellaneous category and as such might have more than one actual genre quantified within it. 
+
+Having observed the distribution by Genre over various variables, we will evaluate *Critic_Score*, *Critic_Count* and *Global_Sales* in relation to the Developer variable, which lets us know which company developed the game:
+
+```{r, Evaluate by Developer}
+
+vgsales_developer <- vgsales %>% group_by(Developer) %>% summarize(avg_score = mean(Critic_Score), avg_count = mean(Critic_Count), avg_sales = mean(Global_Sales))# Create grouped Developer Data
+
+head(vgsales_developer[order(-vgsales_developer$avg_score),]) ##Evaluate sorted rows
+
+
+
+```
+
+
+By ordering the data by *avg_score*, we can observe the top 6 Developers within this data set. What's interesting here is that while sorting through average score, both *avg_score* and *avg_count* variables are relatively close together, *avg_sales* range from 0.01 to 8.53. This would suggest that the average sales a Developer has generated does not necessarily correlate with *average_score*. We can confirm this by running a correlation analysis between these two variables:
+
+```{r, corr avg_score ~ avg_sales}
+cor(vgsales_developer$avg_score,vgsales_developer$avg_sales) ## Calculate Pearson Correlation
+
+
+```
+
+With a simple correlation coefficient of 0.28, there's not much of a linear relationship between these two variables, which would generally mean any linear models fitted to explain this relationship would find little benefit in considering global sales as a predictor for *Critic_Score*. It would also be beneficial to explore whether the video game platform has an overall effect over critic scores:
+
+```{r, platform analysis}
+vgsales_platform <- vgsales %>% group_by(Platform) %>% summarize(avg_score = mean(Critic_Score), avg_count = mean(Critic_Count), avg_sales = mean(Global_Sales))# Create grouped Developer Data
+
+head(vgsales_platform[order(-vgsales_platform$avg_score),]) ##Evaluate sorted rows
+
+```
+
+We can see that the Sega Dreamcast was by far the highest scored, however it's global sales do not go hand-in-hand with this rating. This further cements the idea that score does not necessarily correlate with sales or vice versa.
+
+Next, we will evaluate if average ratings have changed in relation to the release year of each game. We will calculate the average rating by year with the following piece of code:
+
+```{r, Evaluate Year }
+
+vgsales_year <- vgsales %>% group_by(Year_of_Release) %>% summarize(avg_score = mean(Critic_Score), avg_count = mean(Critic_Count), avg_sales = mean(Global_Sales))
+
+head(vgsales_year[order(-vgsales_year$avg_score),]) ##Evaluate sorted rows
+
+
+```
+
+
+We can immediately appreciate that the highest rated years were all in the 90's, with the exception of 2016 who is a fair bit behind them in average rating. Average count of reviews is also low, relative to recent years. This might be because gaming in general was not as mainstream in the 90's as it has been in recent years. If we assume that the average score is a function of overall video game popularity, we can validate this through another correlation analysis:
+
+```{r, pearson year }
+vgsales_year <- vgsales_year[complete.cases(vgsales_year$Year_of_Release),]
+cor(vgsales_year$avg_count,as.numeric(vgsales_year$Year_of_Release), use = "complete.obs") 
+## Calculate Pearson Correlation
+
+```
+
+A positive pearson coefficient of 0.120 indicates a tenuous yet positive linear relationship between Year of Release and average critic score, which would suggest that video game average scores have risen along with overall video game popularity in recent years. 
+
+# Methods and Analysis II - Linear Modeling
+
+Having evaluated most of the variable of interest, we can start by fitting a basic linear equation for Critic Score in the *vgsales data set*:
+
+```{r, fit linear}
+
+
+lm <- lm(Critic_Score ~ Global_Sales, data = vgsales) #Create the linear regression
+summary(lm) #Review the results
+
+
+
+```
+
+The P-Value for this model is highly significant, suggesting a very strong linear relationship between the independent variable *Global_Sales* and *Critic Score*. However, when we evaluate the adjusted r-squared, we see that approximately only 6% of the variability in critic score is explained by the *global sales* variable. While *global sales* does tend to move forwards and backwards along with average score, by itself it is a poor predictor of our dependent variable. Let's evaluate a different variable:
+
+```{r, fit linear2}
+
+
+lm <- lm(Critic_Score ~ Critic_Count, data = vgsales) #Create the linear regression
+summary(lm) #Review the results
+
+
+
+```
+
+We see that *Critic_Count* is also highly significant, and in this case we can capture around 18% of the variability in *Critic_Score*. This is better than 6%, but still well below what we would like. What would happen if we tried them together?:
+
+```{r, fit linear3}
+
+
+lm <- lm(Critic_Score ~ Critic_Count + Global_Sales, data = vgsales) #Create the linear regression
+summary(lm) #Review the results
+
+
+```
+
+
+Taking both variables into the model helps us explain nearly 20% of the variability in *Critic_Score*. This is helpful, but perhaps not the best way to model this data. Lets calculate how accurate this model is by splitting our data into training/test pairs and using the model to predict the test values:
+
+```{r, train test pair lm}
+set.seed(123)
+training.samples <- vgsales$Critic_Score %>% createDataPartition(p = 0.9, list = FALSE)
+
+
+train.data  <- vgsales[training.samples, ]
+test.data <- vgsales[-training.samples, ]
+
+lm <- lm(Critic_Score ~ Critic_Count + Global_Sales, data = train.data) #Create the linear regression
+
+probabilities <- lm %>% predict(test.data, type = "response")
+test.data$Predictions <- probabilities
+rmse(test.data$Critic_Score, test.data$Predictions)
+
+```
+
+An RMSE of 12.77 would mean that predicted values will be on average nearly 13 points way from the actual value. Maybe utilizing *User_Scores* we can more correctly predict *Critic_Scores*:
+
+```{r}
+
+set.seed(321)
+training.samples <- vgsales$Critic_Score %>% createDataPartition(p = 0.9, list = FALSE)
+
+vgsales <- vgsales[complete.cases(vgsales$User_Score),] ## leave only rows with valid user scores
+vgsales <- vgsales[complete.cases(vgsales$Year_of_Release),] ## leave only rows with valid user scores
+
+train.data  <- vgsales[training.samples, ]
+test.data <- vgsales[-training.samples, ]
+
+lm <- lm(Critic_Score ~ User_Score + Critic_Count + Global_Sales + Genre + Year_of_Release + Platform, data = train.data) #Create the linear regression
+
+probabilities <- lm %>% predict(test.data, type = "response") ## Predict Values with model
+test.data$Predictions <- probabilities ## load predictions into test.dataframe
+rmse(test.data$Critic_Score, test.data$Predictions) ## Verify RMSE for model
+
+
+```
+
+Adding the variables *Year_of_Release*, *Platform* and *User Score*, we are able to get an R-squared of almost 0.52, as well as an RMSE of 9.42. This much deviation from the actual values is to be expected, as we can currently only account for roughly half the variability in the *Critic_Score* variables using linear regression. We can instead attempt to model the probability that a game will be reviewed fairly by splitting the variable into a binary favorable/unfavorable review. 
+
+We can assume that games with an 80 or higher in *Critic_Score*  are considered favorable, and all other values below it as Unfavorable. Lets create the necessary variables for our analysis:
+
+```{r, create binary variables}
+vgsales$favorable <- ifelse(vgsales$Critic_Score >= 80,'Favorable','Not Favorable') 
+## Create binary favorable/unfavorable variable
+
+vgsales <- vgsales %>% mutate(TopNa = ifelse(NA_Sales > JP_Sales & NA_Sales > EU_Sales,'Top NA', ifelse( JP_Sales > NA_Sales & JP_Sales > EU_Sales,'Top EU',ifelse(EU_Sales > NA_Sales & EU_Sales > JP_Sales,'Top EU','Top Other')))) ## Evaluate which country had the most sales to see if it has an effect over favorable/unfavorable
+
+str(vgsales)
+```
+
+Since our dependent variable is no longer a continuous variable but a binary one, we will be training a K-NN algorithm in order to predict whether a critic review will be favorable or unfavorable:
+
+```{r}
+
+set.seed(321)
+
+vgsales <- vgsales[complete.cases(vgsales), ] ## Remove all NA Values
+
+knsales <- vgsales %>% select(Critic_Score, User_Score,User_Count , Critic_Count , Global_Sales, Genre, Year_of_Release , Platform,favorable ,Publisher) ## Create subset with variables of interest
+
+training.samples <- knsales$Critic_Score %>% createDataPartition(p = 0.9, list = FALSE) 
+## Create partition
+
+train.data  <- knsales[training.samples, ] ## Subset train data
+test.data <- knsales[-training.samples, ] ## Subset test Data
+
+train.data.labels <- train.data %>% select(favorable) ## Select train labels
+test.data.labels <- test.data %>% select(favorable) ## Select test labels
+
+train.data <- train.data %>% select(User_Score, Critic_Count , Global_Sales, Year_of_Release ,User_Count) 
+## RM favorable Column
+
+test.data <- test.data %>% select(User_Score, Critic_Count , Global_Sales, Year_of_Release  ,User_Count) 
+## RM favorable Column
+
+
+test_pred <- knn(train = train.data, test = test.data,cl = train.data.labels$favorable, k= 79) 
+## Train Model
+
+confusionMatrix(table(test_pred ,test.data.labels$favorable)) ## Evaluate model accuracy
+
+
+```
+
+This approach seems to work far better than plotting the relationship linearly, as our K-NN model reaches far higher accuracy in determining whether a game will have a favorable *Critic_Score* by utilizing the variables *User_Score*, *User_Count*, *Critic_Count*, *Global_Sales* and *Year_of_Release*.
+
+By using cross-validation to verify the output of our model, we can compare the output of the model predictions with the test.data results, achieving 78.2% accuracy in predicting whether a video game will be rated favorably or unfavorably by a critic.
+
+## Conclusion
+
+Data was extracted, cleaned and wrangled resulting in 8,137 values being utilized as our final data. The largest impact to sample size was removing entries where no *Critic_Score* was logged, which resulted in about half of our data being discarded.
+
+The first model considered was a simple linear model, attempting to predict *Critic_Score* through various independent variables. These efforts resulted in a linear model with an R-squared of 0.52, and an RMSE of 9.42. Were we to attempt predicting *Critic_Score* through this model, answers would be on average 9.42 rating points away from the true value.
+
+The second model considered was a K-NN neighbors approach. The target variable *Critic_Score* was converted into a binary variable, where *Critic_Score* above 80 were considered favorable reviews, and scores below were considered unfavorable. 
+
+The data was again split into training/test pairs and the model cross validated with the test data. The K-NN model was able to classify the test.data with 78.2% accuracy by using the variables *User_Score*, *User_Count*, *Year_of_Release* and *Global_Sales* as predictors for the target variable.
+
+## Future work and Limitations
+
+Our first attempt at modeling the variable *Critic_score* was through a simple linear regression, this model, however was only able to quantify approximately 52% of the variability in *Critic_score*. It is not surprising then that the average deviation from the actual value, as predicted by the model was 9.42 rating points away from the actual value. The prediction made through this model is too far away from the actual value.
+
+Our second model attempt to predict *Critic_score* not as a continuous variable but a categorical one. We divided the data into favorable and unfavorable critic scores, defined as a game with a critic score over 80 being considered favorable. We utilized a K-NN algorithm which was able to correctly predict whether a game would have a favorable or unfavorable rating with nearly 80% accuracy. Additional models could be explored, such as random forest applications or logistical regression which might serve as better predictors of this variable.
+
+
+
+
+
